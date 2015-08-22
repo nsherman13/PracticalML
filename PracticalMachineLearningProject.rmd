@@ -1,0 +1,90 @@
+---
+title: "Practical Machine Learning Project"
+author: "Nitzan Sherman"
+date: "Tuesday, August 18, 2015"
+output: html_document
+---
+
+```{r}
+
+```
+
+# Project Purpose
+
+The purpose of this project is to create a model that classifies weight lifting form given a set of variables. The data collected is from various sensors for various subjects. Please see http://groupware.les.inf.puc-rio.br/har for more information the source data.
+
+# Necessary Packages
+```{r}
+library(caret)
+```
+
+# Preprocessing
+Before building the model, I wanted to ensure I understood the underlying data. 
+```{r}
+data <- read.csv("pm1-training.csv",na.strings = c("NA","","#DIV/0!"))
+summary(data)
+```
+
+After looking at the summary of all 160 variables I decided to do the following:
+
+1) Remove all bookkeeping columns(first 7 columns)
+2) Remove all columns that have more than or equal to 90% NAs.
+
+Some models such as random forest and gradient boosting can handle
+NAs fine, but I wanted to minimize noise and felt these variables 
+would not be useful for prediction.
+
+```{r}
+clean_data <- data[,colSums(is.na(data)) <= .1 * nrow(data)]
+clean_data <- clean_data[,c(8:ncol(clean_data))]
+```
+
+# Model Choice and Testing/Training Breakup
+I decided to use a gradient boosting model. I wanted a tree based model that would be relatively easy to interpet and had strong accuracy as well. The one issue with gbm is the fact that the algorithm is prone to overfitting. In order to reduce this, I have also decided to do repeated cross validation with 5 folds and two repeats. Other methods of preventing overfitting including pruning trees and modifying other parameters. 
+
+Even though I'm using repeated cross validation, I've set aside 40% of data for my validation set. This will help me see how accurate my model will do out of sample and confirm my predictions for error. It also gives me leeway to train other models with my 60% of training data, if I decided to train other models.
+
+```{r}
+set.seed(13)
+fitControl <- trainControl(method = "repeatedcv",number = 5,repeats = 2)
+trainingIndexes <- createDataPartition(y = clean_data$classe,p=.6,list = FALSE)
+training_data <- clean_data[trainingIndexes,]
+validation_data <- clean_data[-trainingIndexes,]
+gbmFit <- train(classe ~.,data = training_data,method = "gbm",trControl = fitControl,verbose = FALSE)
+```
+
+# Model Fit, Analysis and Error Fit
+```{r}
+gbmFit
+```
+
+Looking at the results of the iterations, it seems the best accuracy I get is roughly 96% for my final model. This means I assume that my out of sample error is 1 - the accurracy for 4%. I could train my model to get better accuracy within a training set, but I'd be worried about overfitting my model. It's interesting to see 
+
+I also wanted to see how many variables were actually important to the analysis.
+```{r}
+gbmFit$finalModel
+```
+Interestingly enough, only 8/52 predictors had non zero influence in predicting class. If we look at summary of model, we will notice that roll_belt and pitch_forearm account for about a third of the model. These two sensors seem the most important in predicting form(class) which makes sense given participants are doing bicep curls.
+
+```{r}
+summary(gbmFit)
+
+```
+
+This chart is useful in seeing how accuracy increases and number of trees and iterations increases. This makes sense as gradient boosting is a supervised learning algorithm, which means it should get iteratively better as it fits data. Notice how as tree depth increases, accuracy also increases.
+
+```{r}
+trellis.par.set(caretTheme())
+plot(gbmFit)
+```
+# Analysis on Validation Set
+
+Here is my analysis of correct results on validation set. This is a good test to see out of sample error. With repeated cross validation, part of the training set is used as the test set, but this will be a larger sample.
+
+```{r}
+predictions_for_validation <- predict(gbmFit, newdata = validation_data,type = "raw")
+confusionMatrix(validation_data$classe,predictions_for_validation)
+```
+
+As you can see our overall accuracy is 95%. This is slightly worse than we expected with an out of sample error as 5% This could be for a variety of reasons, and it may make sense to do this experiment with more algorithms and more tuning. In addition, note how the accuracy is not consistent for each class. It seems that class A and Class E may be more clear cut than predicting B, c and D, and further analysis is needed to understand this.
+
